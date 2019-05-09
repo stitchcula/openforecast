@@ -7,9 +7,35 @@ import (
 )
 
 var (
-	ErrUninitialized = errors.New("NotInitialized")
-	ErrUnimplemented = errors.New("ErrUnimplemented")
+	ErrUninitialized   = errors.New("NotInitialized")
+	ErrUnimplemented   = errors.New("ErrUnimplemented")
+	ErrIllegalArgument = errors.New("IllegalArgument")
 )
+
+type AbstractTimeBasedModel struct {
+	timeVariable string
+}
+
+func NewAbstractTimeBasedModel() *AbstractTimeBasedModel {
+	return &AbstractTimeBasedModel{}
+}
+
+func (at *AbstractTimeBasedModel) Train(dataSet *openforecast.DataSet) (err error) {
+	if at.timeVariable, err = at.getTimeVariable(dataSet); err != nil {
+		return
+	}
+	// TODO:
+}
+
+func (at *AbstractTimeBasedModel) getTimeVariable(dataSet *openforecast.DataSet) (timeVariable string, err error) {
+	if timeVariable = dataSet.TimeVariable(); timeVariable != "" {
+		return
+	}
+	if independentVars := dataSet.IndependentVariables(); len(independentVars) == 1 {
+		return independentVars[0], nil
+	}
+	return "", ErrIllegalArgument
+}
 
 type AbstractForecastingModel struct {
 	*AccuracyIndicators

@@ -43,6 +43,11 @@ func NewDataSet(timeVariable string, periodsPerYear int, points []DataPoint) *Da
 	return ds
 }
 
+func (ds *DataSet) IndependentVariables() []string {
+
+	return nil
+}
+
 type ForecastingModel interface {
 	Type() string
 
