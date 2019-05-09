@@ -17,13 +17,38 @@ type DataPoint interface {
 	fmt.Stringer
 }
 
-type DataSet []DataPoint
+type DataSet struct {
+	Points         []DataPoint
+	timeVariable   string
+	periodsPerYear int
+}
+
+func (ds *DataSet) TimeVariable() string { return ds.timeVariable }
+func (ds *DataSet) PeriodsPerYear() int  { return ds.periodsPerYear }
+
+func NewDataSetCopy(dataSet *DataSet) *DataSet {
+	return NewDataSet(dataSet.TimeVariable(), dataSet.PeriodsPerYear(), dataSet.Points)
+}
+
+func NewDataSet(timeVariable string, periodsPerYear int, points []DataPoint) *DataSet {
+	ds := &DataSet{
+		timeVariable:   timeVariable,
+		periodsPerYear: periodsPerYear,
+		Points:         make([]DataPoint, 0, len(points)),
+	}
+	// deep copy DataPoint which is reference
+	for _, dp := range points {
+		ds.Points = append(ds.Points, NewObservationCopy(dp))
+	}
+	return ds
+}
 
 type ForecastingModel interface {
 	Type() string
 
-	Train(DataSet) error
-	Forecast(DataSet) (DataSet, error)
+	Train(*DataSet) error
+	Forecast(DataPoint) (float64, error)
+	ForecastAll(*DataSet) (*DataSet, error)
 
 	AIC() float64
 	Bias() float64
@@ -36,7 +61,8 @@ type ForecastingModel interface {
 }
 
 type StreamingModel interface {
-	Update(DataSet)
+	// TODO(StitchCula): DataSet or DataPoint?
+	Update(DataPoint) error
 }
 
 type Observation struct {
