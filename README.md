@@ -1,4 +1,4 @@
-# openforecast
+# OpenForecast
 `net.sourceforge.openforecast` in golang.
 
 ## Implements
