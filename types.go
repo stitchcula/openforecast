@@ -2,6 +2,7 @@ package openforecast
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,8 +45,25 @@ func NewDataSet(timeVariable string, periodsPerYear int, points []DataPoint) *Da
 }
 
 func (ds *DataSet) IndependentVariables() []string {
+	m := make(map[string]struct{})
+	for _, dp := range ds.Points {
+		for _, k := range dp.IndependentVariableNames() {
+			m[k] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	return names
+}
 
-	return nil
+func (ds *DataSet) Sort(independentVariable string) {
+	sort.Slice(ds.Points, func(i, j int) bool {
+		vi, _ := ds.Points[i].IndependentValue(independentVariable)
+		vj, _ := ds.Points[j].IndependentValue(independentVariable)
+		return vi < vj
+	})
 }
 
 type ForecastingModel interface {

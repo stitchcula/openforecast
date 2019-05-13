@@ -4,6 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"github.com/stitchcula/openforecast"
+	"math"
+)
+
+const (
+	Tolerance = 1.0E-8
 )
 
 var (
@@ -13,18 +18,79 @@ var (
 )
 
 type AbstractTimeBasedModel struct {
-	timeVariable string
+	*AbstractForecastingModel
+	impl openforecast.ForecastingModel
+
+	timeVariable   string
+	timeDiff       float64
+	minPeriods     int
+	observedValues *openforecast.DataSet
+	forecastValues *openforecast.DataSet
+	minTimeValue   float64
+	maxTimeValue   float64
 }
 
-func NewAbstractTimeBasedModel() *AbstractTimeBasedModel {
-	return &AbstractTimeBasedModel{}
+func NewAbstractTimeBasedModel(impl openforecast.ForecastingModel, minPeriods int) *AbstractTimeBasedModel {
+	return &AbstractTimeBasedModel{
+		AbstractForecastingModel: NewAbstractForecastingModel(impl),
+		impl:                     impl,
+		minPeriods:               minPeriods,
+	}
 }
 
+// TODO(StitchCula): 没看懂
 func (at *AbstractTimeBasedModel) Train(dataSet *openforecast.DataSet) (err error) {
 	if at.timeVariable, err = at.getTimeVariable(dataSet); err != nil {
 		return
 	}
-	// TODO:
+	if len(dataSet.Points) < at.minPeriods {
+		return ErrIllegalArgument
+	}
+
+	at.observedValues = openforecast.NewDataSetCopy(dataSet)
+	at.observedValues.Sort(at.timeVariable)
+	lastValue, _ := at.observedValues.Points[0].IndependentValue(at.timeVariable)
+	currentValue, _ := at.observedValues.Points[1].IndependentValue(at.timeVariable)
+	at.forecastValues = openforecast.NewDataSet(at.timeVariable, 0, nil)
+	at.timeDiff = currentValue - lastValue
+	at.minTimeValue = lastValue
+
+	for _, dp := range at.observedValues.Points[2:] {
+		lastValue = currentValue
+		currentValue, _ = dp.IndependentValue(at.timeVariable)
+
+		diff := currentValue - lastValue
+		if math.Abs(at.timeDiff-diff) > Tolerance {
+			return fmt.Errorf("inconsistent intervals found in time series, using variable '%s'", at.timeVariable)
+		}
+
+		if _, err = at.forecastValue(currentValue); err != nil {
+			return err
+		}
+	}
+
+	testDataSet := openforecast.NewDataSetCopy(at.observedValues)
+	for var10 := 0; var10 < at.minPeriods; var10++ {
+		testDataSet.Points = testDataSet.Points[1:]
+	}
+
+	return at.calculateAccuracyIndicators(testDataSet)
+}
+
+func (at *AbstractTimeBasedModel) forecastValue(timeValue float64) (float64, error) {
+	dp := openforecast.NewObservation(0)
+	forecast, err := at.impl.Forecast(dp)
+	if err != nil {
+		return 0, err
+	}
+	dp.SetIndependentValue(at.timeVariable, forecast)
+	at.forecastValues.Points = append(at.forecastValues.Points, dp)
+
+	if timeValue > at.maxTimeValue {
+		at.maxTimeValue = timeValue
+	}
+
+	return forecast, nil
 }
 
 func (at *AbstractTimeBasedModel) getTimeVariable(dataSet *openforecast.DataSet) (timeVariable string, err error) {
@@ -63,18 +129,35 @@ func (af *AbstractForecastingModel) ForecastAll(dataSet *openforecast.DataSet) (
 	return dataSet, nil
 }
 
-// TODO:
 func (af *AbstractForecastingModel) calculateAccuracyIndicators(dataSet *openforecast.DataSet) error {
-	/*
-		forecastValues, err := af.ForecastAll(openforecast.NewDataSetCopy(dataSet))
-		if err != nil {
-			return err
-		}
+	af.AccuracyIndicators = NewAccuracyIndicators()
 
-		var sumErr, sumAbsErr, sumAbsPercentErr, sumErrSquared float64
+	forecastValues, err := af.ForecastAll(openforecast.NewDataSetCopy(dataSet))
+	if err != nil {
+		return err
+	}
 
-		af.AccuracyIndicators = NewAccuracyIndicators()
-	*/
+	var sumErr, sumAbsErr, sumAbsPercentErr, sumErrSquared float64
+	for i, fdp := range forecastValues.Points {
+		dp := dataSet.Points[i]
+		x0 := dp.DependentValue()
+		x1 := fdp.DependentValue()
+
+		deta := x1 - x0
+		sumErr += deta
+		sumAbsErr += math.Abs(deta)
+		sumAbsPercentErr += math.Abs(deta / x0)
+		sumErrSquared += deta * deta
+	}
+
+	n := float64(len(dataSet.Points))
+	p := float64(af.impl.NumberOfPredictors())
+	af.AccuracyIndicators.SetAIC(n*math.Log(6.283185307179586) + math.Log(sumErrSquared/n) + (2 * (p + 2)))
+	af.AccuracyIndicators.SetBias(sumErr / n)
+	af.AccuracyIndicators.SetMAD(sumAbsErr / n)
+	af.AccuracyIndicators.SetMAPE(sumAbsPercentErr / n)
+	af.AccuracyIndicators.SetMSE(sumErrSquared / n)
+	af.AccuracyIndicators.SetSAE(sumAbsErr)
 	return nil
 }
 
