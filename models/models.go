@@ -13,28 +13,36 @@ const (
 
 var (
 	ErrUninitialized   = errors.New("NotInitialized")
-	ErrUnimplemented   = errors.New("ErrUnimplemented")
+	ErrUnimplemented   = errors.New("Unimplemented")
 	ErrIllegalArgument = errors.New("IllegalArgument")
+	ErrNotFound        = errors.New("NotFound")
 )
+
+type TimeBasedForecastingModel interface {
+	openforecast.ForecastingModel
+	ForecastTime(float64) (float64, error)
+	NumberOfPeriods() int
+}
 
 type AbstractTimeBasedModel struct {
 	*AbstractForecastingModel
-	impl openforecast.ForecastingModel
+	impl TimeBasedForecastingModel
 
 	timeVariable   string
 	timeDiff       float64
-	minPeriods     int
 	observedValues *openforecast.DataSet
 	forecastValues *openforecast.DataSet
 	minTimeValue   float64
 	maxTimeValue   float64
 }
 
-func NewAbstractTimeBasedModel(impl openforecast.ForecastingModel, minPeriods int) *AbstractTimeBasedModel {
+func (at *AbstractTimeBasedModel) TimeVariable() string  { return at.timeVariable }
+func (at *AbstractTimeBasedModel) TimeInterval() float64 { return at.timeDiff }
+
+func NewAbstractTimeBasedModel(impl TimeBasedForecastingModel) *AbstractTimeBasedModel {
 	return &AbstractTimeBasedModel{
 		AbstractForecastingModel: NewAbstractForecastingModel(impl),
 		impl:                     impl,
-		minPeriods:               minPeriods,
 	}
 }
 
@@ -43,54 +51,92 @@ func (at *AbstractTimeBasedModel) Train(dataSet *openforecast.DataSet) (err erro
 	if at.timeVariable, err = at.getTimeVariable(dataSet); err != nil {
 		return
 	}
-	if len(dataSet.Points) < at.minPeriods {
+
+	if len(dataSet.Points) < at.impl.NumberOfPeriods() {
 		return ErrIllegalArgument
 	}
 
 	at.observedValues = openforecast.NewDataSetCopy(dataSet)
-	at.observedValues.Sort(at.timeVariable)
-	lastValue, _ := at.observedValues.Points[0].IndependentValue(at.timeVariable)
-	currentValue, _ := at.observedValues.Points[1].IndependentValue(at.timeVariable)
-	at.forecastValues = openforecast.NewDataSet(at.timeVariable, 0, nil)
+	at.observedValues.Sort(at.TimeVariable())
+	lastValue, _ := at.observedValues.Points[0].IndependentValue(at.TimeVariable())
+	currentValue, _ := at.observedValues.Points[1].IndependentValue(at.TimeVariable())
+	at.forecastValues = openforecast.NewDataSet(at.TimeVariable(), 0, nil)
 	at.timeDiff = currentValue - lastValue
 	at.minTimeValue = lastValue
 
 	for _, dp := range at.observedValues.Points[2:] {
 		lastValue = currentValue
-		currentValue, _ = dp.IndependentValue(at.timeVariable)
+		currentValue, _ = dp.IndependentValue(at.TimeVariable())
 
 		diff := currentValue - lastValue
 		if math.Abs(at.timeDiff-diff) > Tolerance {
-			return fmt.Errorf("inconsistent intervals found in time series, using variable '%s'", at.timeVariable)
+			return fmt.Errorf("inconsistent intervals found in time series, using variable '%s'", at.TimeVariable())
 		}
 
-		if _, err = at.forecastValue(currentValue); err != nil {
+		if _, err = at.initForecastValue(currentValue); err != nil {
 			return err
 		}
 	}
 
 	testDataSet := openforecast.NewDataSetCopy(at.observedValues)
-	for var10 := 0; var10 < at.minPeriods; var10++ {
+	for var10 := 0; var10 < at.impl.NumberOfPeriods(); var10++ {
 		testDataSet.Points = testDataSet.Points[1:]
 	}
 
 	return at.calculateAccuracyIndicators(testDataSet)
 }
 
-func (at *AbstractTimeBasedModel) forecastValue(timeValue float64) (float64, error) {
-	dp := openforecast.NewObservation(0)
-	forecast, err := at.impl.Forecast(dp)
+// Forecast -> GetForecastValue
+func (at *AbstractTimeBasedModel) Forecast(dp openforecast.DataPoint) (float64, error) {
+	if at.AccuracyIndicators == uninitializedAccuracyIndicators {
+		return 0, ErrUninitialized
+	}
+
+	t, ok := dp.IndependentValue(at.TimeVariable())
+	if !ok {
+		return 0, ErrIllegalArgument
+	}
+	return at.GetForecastValue(t)
+}
+
+// GetForecastValue -> initForecastValue
+func (at *AbstractTimeBasedModel) GetForecastValue(timeValue float64) (float64, error) {
+	// find cache from forecastValues
+	if timeValue >= at.minTimeValue-Tolerance && timeValue <= at.maxTimeValue+Tolerance {
+		for _, dp := range at.forecastValues.Points {
+			if t, ok := dp.IndependentValue(at.TimeVariable()); ok && math.Abs(t-timeValue) < Tolerance {
+				return dp.DependentValue(), nil
+			}
+		}
+	}
+
+	return at.initForecastValue(timeValue)
+}
+
+// initForecastValue -> impl.ForecastTime
+func (at *AbstractTimeBasedModel) initForecastValue(timeValue float64) (float64, error) {
+	forecast, err := at.impl.ForecastTime(timeValue)
 	if err != nil {
 		return 0, err
 	}
-	dp.SetIndependentValue(at.timeVariable, forecast)
+	dp := openforecast.NewObservation(forecast)
+	dp.SetIndependentValue(at.TimeVariable(), timeValue)
+	// TODO(StitchCula): out-of-order
 	at.forecastValues.Points = append(at.forecastValues.Points, dp)
-
 	if timeValue > at.maxTimeValue {
 		at.maxTimeValue = timeValue
 	}
 
 	return forecast, nil
+}
+
+func (at *AbstractTimeBasedModel) GetObservedValue(timeValue float64) (float64, error) {
+	for _, dp := range at.observedValues.Points {
+		if t, ok := dp.IndependentValue(at.TimeVariable()); ok && math.Abs(t-timeValue) < Tolerance {
+			return dp.DependentValue(), nil
+		}
+	}
+	return 0, ErrNotFound
 }
 
 func (at *AbstractTimeBasedModel) getTimeVariable(dataSet *openforecast.DataSet) (timeVariable string, err error) {
@@ -115,6 +161,7 @@ func NewAbstractForecastingModel(impl openforecast.ForecastingModel) *AbstractFo
 	}
 }
 
+// ForecastAll -> impl.Forecast
 func (af *AbstractForecastingModel) ForecastAll(dataSet *openforecast.DataSet) (*openforecast.DataSet, error) {
 	if af.AccuracyIndicators == uninitializedAccuracyIndicators {
 		return nil, ErrUninitialized
