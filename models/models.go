@@ -46,6 +46,10 @@ func NewAbstractTimeBasedModel(impl TimeBasedForecastingModel) *AbstractTimeBase
 	}
 }
 
+func (at *AbstractTimeBasedModel) Update(dp openforecast.DataPoint) error {
+
+}
+
 // TODO(StitchCula): 没看懂
 func (at *AbstractTimeBasedModel) Train(dataSet *openforecast.DataSet) (err error) {
 	if at.timeVariable, err = at.getTimeVariable(dataSet); err != nil {
@@ -205,6 +209,29 @@ func (af *AbstractForecastingModel) calculateAccuracyIndicators(dataSet *openfor
 	af.AccuracyIndicators.SetMAPE(sumAbsPercentErr / n)
 	af.AccuracyIndicators.SetMSE(sumErrSquared / n)
 	af.AccuracyIndicators.SetSAE(sumAbsErr)
+	return nil
+}
+
+// TODO(StitchCula):  对时间戳没有严格处理
+func (af *AbstractForecastingModel) updateAccuracyIndicators(dp openforecast.DataPoint) error {
+	forecastValue, err := af.impl.Forecast(dp)
+	if err != nil {
+		return errors.New("forecast " + dp.String() + " " + err.Error())
+	}
+
+	x0 := dp.DependentValue()
+	x1 := forecastValue
+	deta := x1 - x0
+
+	n := af.AccuracyIndicators.SAE() / af.AccuracyIndicators.MAD()
+	p := float64(af.impl.NumberOfPredictors())
+	af.AccuracyIndicators.SetBias((af.AccuracyIndicators.Bias()*n + deta) / (n + 1))
+	af.AccuracyIndicators.SetSAE(af.AccuracyIndicators.MAD()*n + math.Abs(deta))
+	af.AccuracyIndicators.SetMAD(af.AccuracyIndicators.SAE() / (n + 1))
+	af.AccuracyIndicators.SetMAPE((af.AccuracyIndicators.MAPE()*n + math.Abs(deta/x0)) / (n + 1))
+	af.AccuracyIndicators.SetMSE((af.AccuracyIndicators.MSE()*n + deta*deta) / (n + 1))
+	af.AccuracyIndicators.SetAIC((n+1)*math.Log(6.283185307179586) + math.Log(af.AccuracyIndicators.MSE()) + (2 * (p + 2)))
+
 	return nil
 }
 

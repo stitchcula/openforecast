@@ -32,6 +32,7 @@ func (mod *WeightedMovingAverageModel) setWeights(weights []float64) {
 		adjust = true
 	}
 
+	mod.weights = make([]float64, 0, len(weights))
 	for _, w := range weights {
 		if adjust {
 			mod.weights = append(mod.weights, w/sum)
@@ -60,8 +61,7 @@ func (mod *WeightedMovingAverageModel) ForecastTime(timeValue float64) (float64,
 				return 0, err
 			}
 		}
-
-		forecast += mod.weights[p] + v
+		forecast += mod.weights[p] * v
 	}
 
 	return forecast, nil
