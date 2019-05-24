@@ -3,15 +3,15 @@
 
 ## Implements
 
+- [x] WeightedMovingAverageModel
+- [x] MovingAverageModel
 - [ ] DoubleExponentialSmoothingModel
-- [ ] MovingAverageModel
 - [ ] MultipleLinearRegressionModel
 - [ ] RegressionModel
 - [ ] SimpleExponentialSmoothingModel
 - [ ] NaiveForecastingModel
 - [ ] PolynomialRegressionModel
 - [ ] TripleExponentialSmoothingModel
-- [ ] WeightedMovingAverageModel
 
 ## License
 

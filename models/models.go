@@ -12,6 +12,10 @@ const (
 )
 
 var (
+	Log2Pi = math.Log(math.Pi * 2)
+)
+
+var (
 	ErrUninitialized   = errors.New("NotInitialized")
 	ErrUnimplemented   = errors.New("Unimplemented")
 	ErrIllegalArgument = errors.New("IllegalArgument")
@@ -47,7 +51,20 @@ func NewAbstractTimeBasedModel(impl TimeBasedForecastingModel) *AbstractTimeBase
 }
 
 func (at *AbstractTimeBasedModel) Update(dp openforecast.DataPoint) error {
+	lastValue, _ := at.observedValues.Points[len(at.observedValues.Points)-1].IndependentValue(at.TimeVariable())
+	currentValue, _ := dp.IndependentValue(at.TimeVariable())
 
+	diff := currentValue - lastValue
+	if math.Abs(at.timeDiff-diff) > Tolerance {
+		return fmt.Errorf("inconsistent intervals found in time series, using variable '%s'", at.TimeVariable())
+	}
+
+	if _, err := at.initForecastValue(currentValue); err != nil {
+		return err
+	}
+
+	at.observedValues.Points = append(at.observedValues.Points, openforecast.NewObservationCopy(dp))
+	return at.updateAccuracyIndicators(dp)
 }
 
 // TODO(StitchCula): 没看懂
@@ -203,7 +220,7 @@ func (af *AbstractForecastingModel) calculateAccuracyIndicators(dataSet *openfor
 
 	n := float64(len(dataSet.Points))
 	p := float64(af.impl.NumberOfPredictors())
-	af.AccuracyIndicators.SetAIC(n*math.Log(6.283185307179586) + math.Log(sumErrSquared/n) + (2 * (p + 2)))
+	af.AccuracyIndicators.SetAIC(n*Log2Pi + math.Log(sumErrSquared/n) + (2 * (p + 2)))
 	af.AccuracyIndicators.SetBias(sumErr / n)
 	af.AccuracyIndicators.SetMAD(sumAbsErr / n)
 	af.AccuracyIndicators.SetMAPE(sumAbsPercentErr / n)
@@ -230,7 +247,7 @@ func (af *AbstractForecastingModel) updateAccuracyIndicators(dp openforecast.Dat
 	af.AccuracyIndicators.SetMAD(af.AccuracyIndicators.SAE() / (n + 1))
 	af.AccuracyIndicators.SetMAPE((af.AccuracyIndicators.MAPE()*n + math.Abs(deta/x0)) / (n + 1))
 	af.AccuracyIndicators.SetMSE((af.AccuracyIndicators.MSE()*n + deta*deta) / (n + 1))
-	af.AccuracyIndicators.SetAIC((n+1)*math.Log(6.283185307179586) + math.Log(af.AccuracyIndicators.MSE()) + (2 * (p + 2)))
+	af.AccuracyIndicators.SetAIC((n+1)*Log2Pi + math.Log(af.AccuracyIndicators.MSE()) + (2 * (p + 2)))
 
 	return nil
 }
